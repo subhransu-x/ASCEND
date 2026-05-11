@@ -735,6 +735,120 @@ function AITab({ user }) {
 }
 
 // ══════════════════════════════════════════════
+// FOCUS TAB
+// ══════════════════════════════════════════════
+function FocusTab({ user, gainXP, setU }) {
+  const [duration, setDuration] = useState(25);
+  const [timeLeft, setTimeLeft] = useState(25 * 60);
+  const [active, setActive] = useState(false);
+  const [status, setStatus] = useState("idle"); // idle, running, failed, success
+
+  useEffect(() => {
+    if (!active && status !== "success" && status !== "failed") {
+      setTimeLeft(duration * 60);
+      setStatus("idle");
+    }
+  }, [duration, active, status]);
+
+  useEffect(() => {
+    let int;
+    if (active && timeLeft > 0) {
+      int = setInterval(() => setTimeLeft(t => t - 1), 1000);
+    } else if (active && timeLeft <= 0) {
+      setActive(false);
+      setStatus("success");
+      const xp = duration === 15 ? 30 : duration === 25 ? 60 : 150;
+      gainXP(xp);
+      setU(u => ({
+        ...u, 
+        xpLog: [...(u.xpLog||[]), { amount:xp, source:`Deep Focus (${duration}m)`, date:today() }]
+      }));
+    }
+    return () => clearInterval(int);
+  }, [active, timeLeft, duration, gainXP, setU]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden && active) {
+        setActive(false);
+        setStatus("failed");
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [active]);
+
+  const start = () => {
+    if (status === "failed" || status === "success") setTimeLeft(duration * 60);
+    setStatus("running");
+    setActive(true);
+  };
+
+  const formatTime = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const pct = ((duration * 60 - timeLeft) / (duration * 60)) * 100;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+      <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:20, fontWeight:700 }}>⌛ Deep Focus</div>
+      
+      <GlassCard glow={status === "running" ? T.accent : status === "failed" ? T.red : status === "success" ? T.green : T.primary} style={{ textAlign:"center", padding:"30px 20px" }}>
+        {status === "failed" && (
+          <div style={{ color:T.red, fontSize:14, fontWeight:700, marginBottom:20, animation:"fadeUp 0.3s" }}>
+            ✕ FOCUS BROKEN! You left the app.
+          </div>
+        )}
+        {status === "success" && (
+          <div style={{ color:T.green, fontSize:14, fontWeight:700, marginBottom:20, animation:"fadeUp 0.3s" }}>
+            ✓ FOCUS COMPLETE! +XP Awarded
+          </div>
+        )}
+
+        <div style={{ display:"flex", justifyContent:"center", gap:10, marginBottom:30, opacity: active ? 0.3 : 1, pointerEvents: active ? "none" : "auto" }}>
+          {[15, 25, 50].map(m => (
+            <button key={m} onClick={() => { setDuration(m); setStatus("idle"); setTimeLeft(m*60); }} style={{
+              padding:"8px 16px", borderRadius:12, border:`1px solid ${duration===m ? T.primary : T.borderSolid}`,
+              background: duration===m ? `${T.primary}33` : "#2B2848", color: duration===m ? T.primary : T.text,
+              fontSize:14, fontWeight:600, cursor:"pointer", transition:"all 0.2s"
+            }}>{m} min</button>
+          ))}
+        </div>
+
+        <div style={{ position:"relative", width:200, height:200, margin:"0 auto 30px", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <svg width="200" height="200" style={{ position:"absolute", top:0, left:0, transform:"rotate(-90deg)" }}>
+            <circle cx="100" cy="100" r="90" fill="none" stroke="#2B2848" strokeWidth="8" />
+            <circle cx="100" cy="100" r="90" fill="none" stroke={status==="running"?T.accent:status==="failed"?T.red:status==="success"?T.green:T.primary} strokeWidth="8"
+              strokeDasharray="565" strokeDashoffset={565 - (565 * pct) / 100}
+              style={{ transition:"stroke-dashoffset 1s linear, stroke 0.3s" }} strokeLinecap="round" />
+          </svg>
+          <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:48, fontWeight:700, color: status==="failed" ? T.red : T.text }}>
+            {formatTime(timeLeft)}
+          </div>
+        </div>
+
+        {!active ? (
+          <Btn onClick={start} size="lg" style={{ width:"100%", maxWidth:250 }}>
+            {status === "idle" ? "▶ Start Focus" : "↺ Retry Focus"}
+          </Btn>
+        ) : (
+          <Btn onClick={() => { setActive(false); setStatus("failed"); }} variant="danger" style={{ width:"100%", maxWidth:250 }}>
+            ⏹ Give Up
+          </Btn>
+        )}
+
+        <div style={{ color:T.muted, fontSize:12, marginTop:20, lineHeight:1.5 }}>
+          If you minimize the app, switch tabs, or check your notifications, you will fail and lose your progress. Stay focused!
+        </div>
+      </GlassCard>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════
 // MAIN APP
 // ══════════════════════════════════════════════
 export default function Ascend() {
@@ -987,9 +1101,10 @@ export default function Ascend() {
   const TABS = [
     { id:"dash",   icon:"⊞", label:"Dashboard" },
     { id:"goals",  icon:"🗺", label:"Quests"    },
+    { id:"focus",  icon:"⌛", label:"Focus"     },
     { id:"tasks",  icon:"✓",  label:"Tasks"     },
     { id:"skills", icon:"⚔",  label:"Skills"    },
-    { id:"ai",     icon:"✦",  label:"AI Coach"  },
+    { id:"ai",     icon:"✦",  label:"Coach"     },
   ];
 
   return (
@@ -1063,6 +1178,7 @@ export default function Ascend() {
         {/* Tab content */}
         {tab === "dash"   && <DashTab  user={user} gainXP={gainXP} setU={setU} />}
         {tab === "goals"  && <GoalsTab user={user} setU={setU} gainXP={gainXP} />}
+        {tab === "focus"  && <FocusTab user={user} gainXP={gainXP} setU={setU} />}
         {tab === "tasks"  && <TasksTab user={user} setU={setU} gainXP={gainXP} />}
         {tab === "skills" && <SkillsTab user={user} setU={setU} gainXP={gainXP} />}
         {tab === "ai"     && <AITab    user={user} />}
