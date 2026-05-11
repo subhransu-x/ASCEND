@@ -38,14 +38,26 @@ const calcLvl = xp => {
 };
 
 const callAI = async (sys, userMsg, history = []) => {
-  const msgs = [...history.map(m => ({ role: m.role, content: m.text })), { role: "user", content: userMsg }];
-  const res  = await fetch("https://api.anthropic.com/v1/messages", {
+  const k = localStorage.getItem("ascend_gemini_key");
+  if (!k) return "No API key found.";
+  const contents = history.map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.text }]
+  }));
+  contents.push({ role: "user", parts: [{ text: userMsg }] });
+
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${k}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, system: sys, messages: msgs }),
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: sys }] },
+      contents,
+      generationConfig: { maxOutputTokens: 1000 }
+    })
   });
   const d = await res.json();
-  return d.content?.find(b => b.type === "text")?.text || "";
+  if (d.error) throw new Error(d.error.message);
+  return d.candidates?.[0]?.content?.parts?.[0]?.text || "";
 };
 
 const DEFAULT_USER = {
@@ -735,6 +747,11 @@ export default function Ascend() {
   const [tab,        setTab]        = useState("dash");
   const [xpPops,     setXpPops]     = useState([]);
   const [lvlUpMsg,   setLvlUpMsg]   = useState(null);
+  
+  const [geminiKey,  setGeminiKey]  = useState(() => localStorage.getItem("ascend_gemini_key") || "");
+  const [keyInput,   setKeyInput]   = useState("");
+  const [keyError,   setKeyError]   = useState("");
+  const [testingKey, setTestingKey] = useState(false);
 
   // Load fonts
   useEffect(() => {
@@ -886,6 +903,83 @@ export default function Ascend() {
     if (!nameInput.trim()) return;
     setU(u => ({ ...u, name: nameInput.trim() }));
     setSetupDone(true);
+  }
+
+  // ── GEMINI KEY SCREEN ────────────────────────────
+  if (!geminiKey) return (
+    <div style={{ minHeight:"100vh", background:T.bg, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"'Inter',sans-serif", padding:24 }}>
+      <div style={{ width:"100%", maxWidth:400, animation:"fadeUp 0.5s ease-out" }}>
+        <div style={{ textAlign:"center", marginBottom:36 }}>
+          <div style={{ fontSize:56, marginBottom:12 }}>🤖</div>
+          <div style={{ fontFamily:"'Space Grotesk',sans-serif", fontSize:26, fontWeight:700, color:T.text }}>Connect AI Coach</div>
+          <div style={{ color:T.muted, marginTop:8, fontSize:13, lineHeight:1.6 }}>
+            Ascend uses Google Gemini for AI features.<br/>
+            Your free API key stays on your device only.
+          </div>
+        </div>
+
+        <div style={{ background:"#221F3266", borderRadius:16, padding:"18px 20px", border:`1px solid ${T.borderSolid}55`, marginBottom:20 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:T.primary, marginBottom:10, letterSpacing:"0.06em" }}>HOW TO GET YOUR FREE KEY (2 min)</div>
+          {[
+            ["1", "Go to", "aistudio.google.com", "https://aistudio.google.com"],
+            ["2", "Sign in with Google → click \"Get API Key\"", "", ""],
+            ["3", "Click \"Create API key\" → copy it", "", ""],
+            ["4", "Paste it below — completely free!", "", ""],
+          ].map(([n, text, link, href]) => (
+            <div key={n} style={{ display:"flex", gap:10, marginBottom:8, alignItems:"flex-start" }}>
+              <div style={{ width:20, height:20, borderRadius:6, background:`${T.primary}33`, color:T.primary, fontSize:11, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, marginTop:1 }}>{n}</div>
+              <div style={{ fontSize:12, color:T.sub, lineHeight:1.5 }}>
+                {text}{" "}
+                {link && <a href={href} target="_blank" rel="noreferrer" style={{ color:T.accent, textDecoration:"underline" }}>{link}</a>}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ fontSize:10, color:T.muted, fontWeight:700, letterSpacing:"0.12em", marginBottom:8 }}>YOUR GEMINI API KEY</div>
+        <input
+          value={keyInput}
+          onChange={e => { setKeyInput(e.target.value); setKeyError(""); }}
+          onKeyDown={e => e.key === "Enter" && saveKey()}
+          placeholder="AIza..."
+          style={{
+            width:"100%", padding:"14px 18px", borderRadius:13, marginBottom:10,
+            background:"#221F32", border:`1px solid ${keyError ? T.red+"88" : T.borderSolid}`,
+            color:T.text, fontSize:14, outline:"none", fontFamily:"'Inter',sans-serif",
+            transition:"border-color 0.2s",
+          }}
+        />
+        {keyError && <div style={{ color:T.red, fontSize:12, marginBottom:10 }}>{keyError}</div>}
+
+        <Btn onClick={saveKey} disabled={!keyInput.trim() || testingKey} size="lg" style={{ width:"100%" }}>
+          {testingKey ? "⏳ Testing key..." : "✓ Save & Connect"}
+        </Btn>
+
+        <div style={{ textAlign:"center", marginTop:14, color:T.muted, fontSize:11 }}>
+          🔒 Key is saved only on your device — never sent anywhere else
+        </div>
+      </div>
+      <style>{`@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}`}</style>
+    </div>
+  );
+
+  async function saveKey() {
+    const k = keyInput.trim();
+    if (!k) return;
+    setTestingKey(true);
+    setKeyError("");
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${k}`,
+        { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ contents:[{ role:"user", parts:[{ text:"say hi" }] }], generationConfig:{ maxOutputTokens:10 } }) }
+      );
+      const d = await res.json();
+      if (d.error) { setKeyError("❌ Invalid key: " + d.error.message); setTestingKey(false); return; }
+      localStorage.setItem("ascend_gemini_key", k);
+      setGeminiKey(k);
+    } catch { setKeyError("❌ Connection failed. Check your internet and try again."); }
+    setTestingKey(false);
   }
 
   // ── MAIN APP ──────────────────────────────────────
