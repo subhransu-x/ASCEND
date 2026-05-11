@@ -61,7 +61,7 @@ const FREE_MODELS = [
   "nvidia/nemotron-3-nano-30b-a3b:free",
   "openai/gpt-oss-20b:free",
   "google/gemma-4-31b-it:free",
-  "google/gemma-4-26b-a4b-it:free"
+  "google/gemma-4-26b-a4b-it:free",
 ];
 
 const callAI = async (sys, userMsg, history = []) => {
@@ -828,11 +828,21 @@ Rules: 2-3 phases, 2-4 tasks each. xp 15-60 based on difficulty. daysFromNow: sp
               duration: "Week 1",
               milestones: ["Initial research and setup"],
               tasks: [
-                { title: `Start working on ${title}`, description: "Initial step for offline generation.", xp: 20, daysFromNow: 1 },
-                { title: "Define roadmap", description: "Offline fallback task.", xp: 30, daysFromNow: 2 }
-              ]
-            }
-          ]
+                {
+                  title: `Start working on ${title}`,
+                  description: "Initial step for offline generation.",
+                  xp: 20,
+                  daysFromNow: 1,
+                },
+                {
+                  title: "Define roadmap",
+                  description: "Offline fallback task.",
+                  xp: 30,
+                  daysFromNow: 2,
+                },
+              ],
+            },
+          ],
         };
       }
       const goalId = uid();
@@ -1876,14 +1886,17 @@ function SkillsTab({ user, setU, gainXP }) {
 // ══════════════════════════════════════════════
 // FOCUS TAB  —  Solo Leveling Timer
 // ══════════════════════════════════════════════
-function FocusTab({ user, gainXP, setU }) {
+function FocusTab({ user, gainXP, setU, active }) {
   const [mode, setMode] = useState("deep");
   const [duration, setDuration] = useState(25);
   const [timeLeft, setTimeLeft] = useState(25 * 60);
-  const [status, setStatus] = useState("idle"); // idle | running | paused | done | failed
+  const [status, setStatus] = useState("idle");
   const [aiMsg, setAiMsg] = useState("");
+  const [monkMaxPause, setMonkMaxPause] = useState(60);
+  const [monkPauseLeft, setMonkPauseLeft] = useState(60);
 
   const timerRef = useRef(null);
+  const pauseTimerRef = useRef(null);
   const totalSecs = duration * 60;
 
   const MODES = [
@@ -1893,26 +1906,42 @@ function FocusTab({ user, gainXP, setU }) {
       icon: "///",
       color: T.primary,
       mins: 25,
-      desc: "Focused sprint — no distractions",
+      desc: "Pause and reset at will",
     },
     {
       id: "monk",
       label: "Monk Mode",
-      icon: "",
-      color: T.accent,
+      icon: "❖",
+      color: T.amber,
       mins: 50,
-      desc: "Extended deep flow state",
+      desc: "Strict pause limit, no resets",
     },
     {
       id: "flow",
       label: "Flow State",
-      icon: "",
+      icon: "⊗",
       color: T.green,
       mins: 90,
-      desc: "Full immersion session",
+      desc: "No pause. Quitting loses all progress",
     },
   ];
   const currentMode = MODES.find((m) => m.id === mode);
+
+  useEffect(() => {
+    if (
+      !active &&
+      mode === "flow" &&
+      (status === "running" || status === "paused")
+    ) {
+      clearInterval(timerRef.current);
+      clearInterval(pauseTimerRef.current);
+      setStatus("failed");
+      setTimeLeft(0);
+      setAiMsg(
+        "Flow State broken! You lost focus by leaving the tab. 0 XP gained.",
+      );
+    }
+  }, [active, mode, status]);
 
   const fmt = (s) =>
     `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -1920,6 +1949,7 @@ function FocusTab({ user, gainXP, setU }) {
 
   const start = () => {
     if (status === "idle" || status === "paused") {
+      clearInterval(pauseTimerRef.current);
       setStatus("running");
       timerRef.current = setInterval(() => {
         setTimeLeft((t) => {
@@ -1939,7 +1969,7 @@ function FocusTab({ user, gainXP, setU }) {
                 },
               ],
             }));
-            setAiMsg(` Session complete! +${xp} XP earned. You're ascending.`);
+            setAiMsg(`Session complete! +${xp} XP earned. You're ascending.`);
             return 0;
           }
           return t - 1;
@@ -1949,26 +1979,59 @@ function FocusTab({ user, gainXP, setU }) {
   };
 
   const pause = () => {
+    if (mode === "flow") return;
     clearInterval(timerRef.current);
     setStatus("paused");
+    if (mode === "monk") {
+      pauseTimerRef.current = setInterval(() => {
+        setMonkPauseLeft((p) => {
+          if (p <= 1) {
+            clearInterval(pauseTimerRef.current);
+            setStatus("failed");
+            setTimeLeft(0);
+            setAiMsg("Monk Mode failed. You paused too long. 0 XP gained.");
+            return 0;
+          }
+          return p - 1;
+        });
+      }, 1000);
+    }
   };
 
   const reset = () => {
+    if (
+      mode === "monk" &&
+      status !== "failed" &&
+      status !== "done" &&
+      status !== "idle"
+    )
+      return;
     clearInterval(timerRef.current);
+    clearInterval(pauseTimerRef.current);
+
+    if (mode === "flow" && status === "running") {
+      setStatus("failed");
+      setTimeLeft(0);
+      setAiMsg("Flow State cancelled. You gave up. 0 XP gained.");
+      return;
+    }
+
     setTimeLeft(duration * 60);
+    setMonkPauseLeft(monkMaxPause);
     setStatus("idle");
     setAiMsg("");
   };
 
   const selectMode = (m) => {
-    if (status !== "idle") return;
+    if (status !== "idle" && status !== "done" && status !== "failed") return;
     setMode(m.id);
     setDuration(m.mins);
     setTimeLeft(m.mins * 60);
+    if (m.id === "monk") setMonkPauseLeft(monkMaxPause);
+    setStatus("idle");
     setAiMsg("");
   };
 
-  // SVG ring progress
   const ringSize = 220;
   const radius = 90;
   const circ = 2 * Math.PI * radius;
@@ -1989,7 +2052,10 @@ function FocusTab({ user, gainXP, setU }) {
             style={{
               padding: "12px 8px",
               borderRadius: 16,
-              cursor: status !== "idle" ? "not-allowed" : "pointer",
+              cursor:
+                status !== "idle" && status !== "done" && status !== "failed"
+                  ? "not-allowed"
+                  : "pointer",
               background:
                 mode === m.id ? `${m.color}18` : "rgba(168,85,247,0.04)",
               border: `1px solid ${mode === m.id ? m.color + "55" : T.border}`,
@@ -1999,7 +2065,13 @@ function FocusTab({ user, gainXP, setU }) {
               gap: 4,
               boxShadow: mode === m.id ? `0 0 20px ${m.color}22` : "none",
               transition: "all 0.2s",
-              opacity: status !== "idle" && mode !== m.id ? 0.4 : 1,
+              opacity:
+                status !== "idle" &&
+                status !== "done" &&
+                status !== "failed" &&
+                mode !== m.id
+                  ? 0.4
+                  : 1,
             }}
           >
             <span style={{ fontSize: 20 }}>{m.icon}</span>
@@ -2018,6 +2090,42 @@ function FocusTab({ user, gainXP, setU }) {
         ))}
       </div>
 
+      {mode === "monk" && status === "idle" && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            justifyContent: "center",
+            fontSize: 12,
+            color: T.muted,
+          }}
+        >
+          Max Pause Bank:
+          <select
+            value={monkMaxPause}
+            onChange={(e) => {
+              const val = parseInt(e.target.value);
+              setMonkMaxPause(val);
+              setMonkPauseLeft(val);
+            }}
+            style={{
+              background: "rgba(0,0,0,0.3)",
+              color: T.text,
+              border: `1px solid ${T.border}`,
+              borderRadius: 8,
+              padding: "4px 8px",
+              outline: "none",
+              cursor: "pointer",
+            }}
+          >
+            <option value={5}>5 Seconds</option>
+            <option value={60}>1 Minute</option>
+            <option value={300}>5 Minutes</option>
+          </select>
+        </div>
+      )}
+
       {/* Timer Ring */}
       <div
         style={{
@@ -2035,7 +2143,6 @@ function FocusTab({ user, gainXP, setU }) {
             height={ringSize}
             style={{ transform: "rotate(-90deg)" }}
           >
-            {/* Track */}
             <circle
               cx={ringSize / 2}
               cy={ringSize / 2}
@@ -2044,24 +2151,22 @@ function FocusTab({ user, gainXP, setU }) {
               stroke="rgba(168,85,247,0.1)"
               strokeWidth={12}
             />
-            {/* Progress */}
             <circle
               cx={ringSize / 2}
               cy={ringSize / 2}
               r={radius}
               fill="none"
-              stroke={currentMode.color}
+              stroke={status === "failed" ? T.red : currentMode.color}
               strokeWidth={12}
               strokeLinecap="round"
               strokeDasharray={circ}
               strokeDashoffset={dash}
               style={{
                 transition: "stroke-dashoffset 0.9s ease",
-                filter: `drop-shadow(0 0 10px ${currentMode.color}88)`,
+                filter: `drop-shadow(0 0 10px ${status === "failed" ? T.red : currentMode.color}88)`,
               }}
             />
           </svg>
-          {/* Center content */}
           <div
             style={{
               position: "absolute",
@@ -2077,14 +2182,20 @@ function FocusTab({ user, gainXP, setU }) {
                 fontFamily: "'Space Grotesk', sans-serif",
                 fontSize: 42,
                 fontWeight: 800,
-                color: T.text,
+                color: status === "failed" ? T.red : T.text,
                 letterSpacing: "-2px",
                 lineHeight: 1,
               }}
             >
               {fmt(timeLeft)}
             </div>
-            <div style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: status === "failed" ? T.red : T.muted,
+                marginTop: 4,
+              }}
+            >
               {status === "idle"
                 ? currentMode.desc
                 : status === "running"
@@ -2093,13 +2204,28 @@ function FocusTab({ user, gainXP, setU }) {
                     ? "Paused"
                     : status === "done"
                       ? "Complete! ✓"
-                      : ""}
+                      : "Failed ✕"}
             </div>
-            <div style={{ marginTop: 8 }}>
-              <Tag color={currentMode.color}>
-                {currentMode.icon} {currentMode.label}
-              </Tag>
-            </div>
+            {status === "paused" && mode === "monk" && (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: T.red,
+                  fontWeight: 600,
+                  marginTop: 6,
+                  animation: "pulse 1s infinite",
+                }}
+              >
+                Pause Left: {fmt(monkPauseLeft)}
+              </div>
+            )}
+            {status !== "paused" && (
+              <div style={{ marginTop: 8 }}>
+                <Tag color={status === "failed" ? T.red : currentMode.color}>
+                  {currentMode.icon} {currentMode.label}
+                </Tag>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2115,44 +2241,64 @@ function FocusTab({ user, gainXP, setU }) {
 
       {/* Controls */}
       <div style={{ display: "flex", gap: 10 }}>
-        {status === "idle" || status === "paused" ? (
-          <Btn onClick={start} size="lg" style={{ flex: 1 }}>
-            {status === "paused" ? "▶ Resume" : "▶ Start Session"}
+        {status === "idle" ||
+        status === "paused" ||
+        status === "done" ||
+        status === "failed" ? (
+          <Btn
+            onClick={status === "done" || status === "failed" ? reset : start}
+            size="lg"
+            style={{ flex: 1 }}
+          >
+            {status === "paused"
+              ? "▶ Resume"
+              : status === "done" || status === "failed"
+                ? "↻ Reset"
+                : "▶ Start Session"}
           </Btn>
         ) : (
-          <Btn onClick={pause} size="lg" variant="ghost" style={{ flex: 1 }}>
-            ⏸ Pause
-          </Btn>
+          mode !== "flow" && (
+            <Btn onClick={pause} size="lg" variant="ghost" style={{ flex: 1 }}>
+              ⏸ Pause
+            </Btn>
+          )
         )}
-        {status !== "idle" && (
-          <button
-            onClick={reset}
-            style={{
-              padding: "14px 20px",
-              borderRadius: 14,
-              background: "rgba(248,113,113,0.08)",
-              border: "1px solid rgba(248,113,113,0.2)",
-              color: T.red,
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            ✕ Reset
-          </button>
-        )}
+
+        {status !== "idle" &&
+          status !== "done" &&
+          status !== "failed" &&
+          mode !== "monk" && (
+            <button
+              onClick={reset}
+              style={{
+                padding: "14px 20px",
+                borderRadius: 14,
+                background: "rgba(248,113,113,0.08)",
+                border: "1px solid rgba(248,113,113,0.2)",
+                color: T.red,
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              ✕ {mode === "flow" ? "Give Up" : "Reset"}
+            </button>
+          )}
       </div>
 
       {/* Session complete / AI message */}
       {aiMsg && (
         <div
           style={{
-            background: `${currentMode.color}0d`,
-            border: `1px solid ${currentMode.color}33`,
+            background:
+              status === "failed"
+                ? "rgba(248,113,113,0.1)"
+                : `${currentMode.color}0d`,
+            border: `1px solid ${status === "failed" ? "rgba(248,113,113,0.3)" : currentMode.color + "33"}`,
             borderRadius: 16,
             padding: "14px 16px",
             fontSize: 14,
-            color: T.text,
+            color: status === "failed" ? T.red : T.text,
             lineHeight: 1.6,
             animation: "fadeUp 0.4s ease-out",
           }}
@@ -3334,9 +3480,14 @@ export default function Ascend() {
         {tab === "goals" && (
           <GoalsTab user={user} setU={setU} gainXP={gainXP} />
         )}
-        {tab === "focus" && (
-          <FocusTab user={user} gainXP={gainXP} setU={setU} />
-        )}
+        <div style={{ display: tab === "focus" ? "block" : "none" }}>
+          <FocusTab
+            user={user}
+            gainXP={gainXP}
+            setU={setU}
+            active={tab === "focus"}
+          />
+        </div>
         {tab === "tasks" && (
           <TasksTab user={user} setU={setU} gainXP={gainXP} />
         )}
