@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRegisterSW } from "virtual:pwa-register/react";
 
 const T = {
   // Backgrounds
@@ -133,6 +134,17 @@ const DEFAULT_USER = {
     { id: "sk3", name: "Learning", icon: "", xp: 0, color: T.blue },
   ],
   xpLog: [],
+};
+
+const loadPersistedUser = () => {
+  try {
+    const saved = localStorage.getItem("asc_v2");
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      return { ...DEFAULT_USER, ...parsed };
+    }
+  } catch {}
+  return DEFAULT_USER;
 };
 
 // ══════════════════════════════════════════════
@@ -293,7 +305,7 @@ function Btn({
               ? "14px 32px"
               : "10px 20px",
         fontSize: size === "sm" ? 12 : size === "lg" ? 15 : 13,
-        opacity: disabled ? 0.35 : 1,
+        opacity: disabled ? 0.6 : 1,
         transform: hov && !disabled ? "translateY(-1px)" : "translateY(0)",
         boxShadow:
           hov && !disabled && variant === "primary"
@@ -446,16 +458,16 @@ function DashTab({ user, gainXP, setU }) {
     .reduce((s, e) => s + e.amount, 0);
   const goalPct = user.goals.length
     ? Math.round(
-        user.goals.reduce((s, g) => {
-          const gt = user.tasks.filter((t) => t.goalId === g.id);
-          return (
-            s +
-            (gt.length
-              ? (gt.filter((t) => t.status === "done").length / gt.length) * 100
-              : 0)
-          );
-        }, 0) / user.goals.length,
-      )
+      user.goals.reduce((s, g) => {
+        const gt = user.tasks.filter((t) => t.goalId === g.id);
+        return (
+          s +
+          (gt.length
+            ? (gt.filter((t) => t.status === "done").length / gt.length) * 100
+            : 0)
+        );
+      }, 0) / user.goals.length,
+    )
     : 0;
   const nextTask = tasks.find((t) => t.status === "pending");
 
@@ -533,32 +545,53 @@ function DashTab({ user, gainXP, setU }) {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         {[
           {
-            icon: "///",
+            icon: (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.accent} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: `drop-shadow(0 0 6px ${T.accent})` }}>
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            ),
             label: "XP Today",
             value: `+${todayXP}`,
             color: T.accent,
           },
           {
-            icon: "[DONE]",
+            icon: (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.green} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: `drop-shadow(0 0 6px ${T.green})` }}>
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            ),
             label: "Tasks Done",
             value: `${done}/${tasks.length}`,
             color: T.green,
           },
           {
-            icon: "◎",
+            icon: (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.primary} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: `drop-shadow(0 0 6px ${T.primary})` }}>
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="6" />
+                <circle cx="12" cy="12" r="2" />
+              </svg>
+            ),
             label: "Active Quests",
             value: user.goals.length,
             color: T.primary,
           },
           {
-            icon: "",
+            icon: (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={T.pink} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: `drop-shadow(0 0 6px ${T.pink})` }}>
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                <line x1="12" y1="22.08" x2="12" y2="12" />
+              </svg>
+            ),
             label: "Goal Progress",
             value: `${goalPct}%`,
             color: T.pink,
           },
         ].map(({ icon, label, value, color }) => (
           <GlassCard key={label} style={{ padding: "16px 14px" }}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{icon}</div>
+            <div style={{ marginBottom: 8, display: "flex", alignItems: "center" }}>{icon}</div>
             <div
               style={{
                 fontFamily: "'Space Grotesk', sans-serif",
@@ -573,9 +606,10 @@ function DashTab({ user, gainXP, setU }) {
             <div
               style={{
                 fontSize: 11,
-                color: T.muted,
-                marginTop: 4,
+                color: "rgba(255,255,255,0.7)",
+                marginTop: 6,
                 letterSpacing: "0.02em",
+                fontWeight: 500,
               }}
             >
               {label}
@@ -648,6 +682,8 @@ function DashTab({ user, gainXP, setU }) {
         ) : (
           user.skills.slice(0, 5).map((s, i) => {
             const si = calcLvl(s.xp);
+            const fallbackIcons = ["⚡", "🛡️", "🧠", "🔥", "🎯"];
+            const displayIcon = s.icon || fallbackIcons[i % fallbackIcons.length];
             return (
               <div
                 key={s.id}
@@ -676,9 +712,9 @@ function DashTab({ user, gainXP, setU }) {
                     flexShrink: 0,
                   }}
                 >
-                  {s.icon}
+                  {displayIcon}
                 </div>
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0, paddingRight: 4 }}>
                   <div
                     style={{
                       display: "flex",
@@ -687,12 +723,12 @@ function DashTab({ user, gainXP, setU }) {
                     }}
                   >
                     <span
-                      style={{ fontSize: 13, fontWeight: 600, color: T.text }}
+                      style={{ fontSize: 13, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
                     >
                       {s.name}
                     </span>
                     <span
-                      style={{ fontSize: 11, color: s.color, fontWeight: 700 }}
+                      style={{ fontSize: 11, color: s.color, fontWeight: 700, flexShrink: 0, marginLeft: 8 }}
                     >
                       Lv.{si.l}
                     </span>
@@ -1254,9 +1290,9 @@ function TasksTab({ user, setU, gainXP }) {
       xpLog:
         xpGain > 0
           ? [
-              ...(u.xpLog || []),
-              { amount: xpGain, source: t.title, date: today() },
-            ]
+            ...(u.xpLog || []),
+            { amount: xpGain, source: t.title, date: today() },
+          ]
           : u.xpLog || [],
     }));
     if (xpGain > 0) gainXP(xpGain);
@@ -2067,9 +2103,9 @@ function FocusTab({ user, gainXP, setU, active }) {
               transition: "all 0.2s",
               opacity:
                 status !== "idle" &&
-                status !== "done" &&
-                status !== "failed" &&
-                mode !== m.id
+                  status !== "done" &&
+                  status !== "failed" &&
+                  mode !== m.id
                   ? 0.4
                   : 1,
             }}
@@ -2242,9 +2278,9 @@ function FocusTab({ user, gainXP, setU, active }) {
       {/* Controls */}
       <div style={{ display: "flex", gap: 10 }}>
         {status === "idle" ||
-        status === "paused" ||
-        status === "done" ||
-        status === "failed" ? (
+          status === "paused" ||
+          status === "done" ||
+          status === "failed" ? (
           <Btn
             onClick={status === "done" || status === "failed" ? reset : start}
             size="lg"
@@ -2372,9 +2408,9 @@ function AITab({ user }) {
     const recent = user.tasks.slice(-15);
     const dnPct = recent.length
       ? Math.round(
-          (recent.filter((t) => t.status === "done").length / recent.length) *
-            100,
-        )
+        (recent.filter((t) => t.status === "done").length / recent.length) *
+        100,
+      )
       : 0;
     try {
       const r = await callAI(
@@ -2694,9 +2730,15 @@ function AITab({ user }) {
 // MAIN APP
 // ══════════════════════════════════════════════
 export default function Ascend() {
-  const [setupDone, setSetupDone] = useState(false);
-  const [nameInput, setNameInput] = useState("");
-  const [user, setUser] = useState(DEFAULT_USER);
+  const [user, setUser] = useState(loadPersistedUser);
+  const [setupDone, setSetupDone] = useState(() => {
+    const u = loadPersistedUser();
+    return !!u.name;
+  });
+  const [nameInput, setNameInput] = useState(() => {
+    const u = loadPersistedUser();
+    return u.name || "";
+  });
   const [tab, setTab] = useState("dash");
   const [xpPops, setXpPops] = useState([]);
   const [lvlUpMsg, setLvlUpMsg] = useState(null);
@@ -2707,6 +2749,41 @@ export default function Ascend() {
   const [keyInput, setKeyInput] = useState("");
   const [keyError, setKeyError] = useState("");
   const [testingKey, setTestingKey] = useState(false);
+
+  // PWA Service Worker hooks
+  const {
+    needRefresh: [needRefresh],
+    updateServiceWorker,
+  } = useRegisterSW({
+    onRegistered(r) {
+      console.log("SW Registered:", r);
+    },
+    onRegisterError(error) {
+      console.log("SW registration error", error);
+    },
+  });
+
+  // Custom In-App Install Prompt
+  const [installPrompt, setInstallPrompt] = useState(null);
+  useEffect(() => {
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+    };
+    window.addEventListener("beforeinstallprompt", handleBeforeInstall);
+    return () =>
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstall);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === "accepted") {
+      console.log("User accepted the install prompt");
+    }
+    setInstallPrompt(null);
+  };
 
   // Load fonts
   useEffect(() => {
@@ -2720,23 +2797,11 @@ export default function Ascend() {
     }
   }, []);
 
-  // Load from storage
-  useEffect(() => {
-    window.storage
-      ?.get("asc_v2")
-      .then((r) => {
-        if (r?.value) {
-          const u = JSON.parse(r.value);
-          setUser(u);
-          if (u.name) setSetupDone(true);
-        }
-      })
-      .catch(() => {});
-  }, []);
+
 
   const persist = (u) => {
     try {
-      window.storage?.set("asc_v2", JSON.stringify(u));
+      localStorage.setItem("asc_v2", JSON.stringify(u));
     } catch {}
   };
 
@@ -2793,7 +2858,8 @@ export default function Ascend() {
     return (
       <div
         style={{
-          minHeight: "100vh",
+          minHeight: "100dvh",
+          padding: 16,
           background: "rgba(8,6,18,0.85)",
           backdropFilter: "blur(10px)",
           display: "flex",
@@ -2847,22 +2913,19 @@ export default function Ascend() {
           }}
         >
           <div style={{ textAlign: "center", marginBottom: 36 }}>
-            <div
+            <img
+              src="/logo.png"
+              alt="Ascend Logo"
               style={{
-                width: 64,
-                height: 64,
-                borderRadius: 20,
-                background: `linear-gradient(135deg, ${T.primaryDim}, ${T.glow})`,
+                width: 96,
+                height: 96,
+                borderRadius: 24,
                 margin: "0 auto 20px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 30,
-                boxShadow: "0 0 32px rgba(168,85,247,0.5)",
+                display: "block",
+                filter: "drop-shadow(0 0 32px rgba(168,85,247,0.65))",
+                objectFit: "contain",
               }}
-            >
-              ///
-            </div>
+            />
             <div
               style={{
                 fontFamily: "'Space Grotesk', sans-serif",
@@ -2920,16 +2983,15 @@ export default function Ascend() {
     return (
       <div
         style={{
-          minHeight: "100vh",
-          background: "rgba(8,6,18,0.7)",
-          backdropFilter: "blur(10px)",
+          minHeight: "100dvh",
+          background: `radial-gradient(circle at top right, rgba(168,85,247,0.18), transparent 65%), radial-gradient(circle at bottom left, rgba(217,70,239,0.12), transparent 65%), ${T.bgDeep}`,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           fontFamily: "'Inter', sans-serif",
           position: "relative",
           overflow: "hidden",
-          padding: 24,
+          padding: 16,
         }}
       >
         <div
@@ -2975,7 +3037,19 @@ export default function Ascend() {
           }}
         >
           <div style={{ textAlign: "center", marginBottom: 32 }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}></div>
+            <img
+              src="/logo.png"
+              alt="Ascend AI Coach"
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: 20,
+                margin: "0 auto 16px",
+                display: "block",
+                filter: "drop-shadow(0 0 24px rgba(168,85,247,0.5))",
+                objectFit: "contain",
+              }}
+            />
             <div
               style={{
                 fontFamily: "'Space Grotesk', sans-serif",
@@ -3348,6 +3422,43 @@ export default function Ascend() {
           zIndex: 1,
         }}
       >
+        {/* PWA Update / Reload notification banner */}
+        {needRefresh && (
+          <div
+            style={{
+              margin: "16px 0 0",
+              padding: "12px 16px",
+              background: "rgba(168,85,247,0.15)",
+              border: `1px solid ${T.primary}`,
+              borderRadius: 16,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              backdropFilter: "blur(20px)",
+              animation: "fadeUp 0.35s ease-out",
+            }}
+          >
+            <div style={{ fontSize: 13, color: T.text, fontWeight: 500 }}>
+              ✦ New update available
+            </div>
+            <button
+              onClick={() => updateServiceWorker(true)}
+              style={{
+                background: T.primary,
+                color: "#fff",
+                border: "none",
+                padding: "6px 12px",
+                borderRadius: 10,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                fontFamily: "'Space Grotesk', sans-serif",
+              }}
+            >
+              Reload App
+            </button>
+          </div>
+        )}
         <div style={{ padding: "56px 0 24px" }}>
           <div
             style={{
@@ -3417,6 +3528,24 @@ export default function Ascend() {
                 >
                   STREAK {user.streak}
                 </div>
+              )}
+              {installPrompt && (
+                <button
+                  onClick={handleInstallApp}
+                  style={{
+                    background: "rgba(217,70,239,0.15)",
+                    border: `1px solid ${T.glow}`,
+                    borderRadius: 12,
+                    padding: "7px 13px",
+                    fontFamily: "'Space Grotesk', sans-serif",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    color: T.glow,
+                    cursor: "pointer",
+                  }}
+                >
+                  ✦ Install
+                </button>
               )}
               <div
                 style={{
